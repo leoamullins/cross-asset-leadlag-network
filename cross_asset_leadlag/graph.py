@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 WINDOW = 252
 REBAL_FREQ = "M"
@@ -122,29 +123,23 @@ def leadlag_graph(
     visualise: bool = True,
 ):
     """
-    Generates a directed graph from a given adjacency matrix and visualizes it as a
-    lead-lag network by filtering the most significant edges and applying a scoring
-    metric to determine node importance.
+    Generate a directed graph from adjacency ``A`` and optionally visualise it as a
+    lead–lag network. Keeps the most significant edges and computes per‑node scores.
 
     Args:
-        A (pd.DataFrame): Input adjacency matrix representing the graph.
-        title (str): Title for the visualized graph. Default is "lead-lag network".
-        max_edges (int): Maximum number of edges to display, sorted by weight.
-            Default is 80.
-        node_score (str): Method for scoring nodes to determine importance. Options
-            include "pagerank" or "out_strength". Default is "out_strength".
-        layout (str): Layout algorithm for visualizing the graph. Options include
-            "spring", "kamada_kawai", "circular". Default is "circular".
-        seed (int): Random seed for layout reproducibility (used in spring layout
-            algorithm). Default is 42.
-        visualise (bool): Whether to display the graph visualization. Default is True.
+        A (pd.DataFrame): Input adjacency matrix.
+        title (str): Title for the visualised graph. Default "lead-lag network".
+        max_edges (int): Maximum number of edges to draw (by |weight|). Default 80.
+        node_score (str): Node scoring method: "pagerank" or "out_strength".
+        layout (str): Graph layout: "spring", "kamada_kawai", or "circular".
+        seed (int): Random seed for layout reproducibility (spring layout).
+        visualise (bool): Whether to display the visualisation.
 
     Returns:
-        tuple: A tuple containing the filtered directed graph (nx.DiGraph) and a
-        pandas Series representing the z-scored node importance scores (leaders and
-        followers).
+        tuple: (H, s) where ``H`` is the pruned ``nx.DiGraph`` and ``s`` is a Series
+        of z‑scored node leadership values.
     """
-    # Build base graph from adjacency (ignore zero-weight entries)
+    # Build base graph from adjacency (ignore zero‑weight entries)
     G = nx.from_pandas_adjacency(A, create_using=nx.DiGraph)
 
     edges = [(u, v, d["weight"]) for u, v, d in G.edges(data=True)]
@@ -196,7 +191,9 @@ def leadlag_graph(
     # edge style
     weights = np.array([abs(H[u][v]["weight"]) for u, v in H.edges()])
     if weights.size:
-        ew = 1.0 + 4.0 * (weights - weights.min()) / (np.ptp(weights) if np.ptp(weights) > 0 else 1.0)
+        ew = 1.0 + 4.0 * (weights - weights.min()) / (
+            np.ptp(weights) if np.ptp(weights) > 0 else 1.0
+        )
     else:
         ew = 1.5
 
@@ -210,7 +207,9 @@ def leadlag_graph(
             cmap="coolwarm",
         )
         if H.number_of_edges() > 0:
-            nx.draw_networkx_edges(H, pos, arrowstyle="->", arrowsize=12, width=ew, edge_color="#555")
+            nx.draw_networkx_edges(
+                H, pos, arrowstyle="->", arrowsize=12, width=ew, edge_color="#555"
+            )
         nx.draw_networkx_labels(H, pos, font_size=9)
 
         if len(H):
@@ -219,7 +218,9 @@ def leadlag_graph(
 
         subtitle = None
         if G.number_of_edges() == 0:
-            subtitle = "No edges passed the correlation/lag threshold; showing nodes only."
+            subtitle = (
+                "No edges passed the correlation/lag threshold; showing nodes only."
+            )
         elif H.number_of_edges() == 0:
             subtitle = "Edges were pruned by max_edges/top-k; showing nodes only."
 
@@ -338,3 +339,28 @@ def build_adj_fast(
         return pd.DataFrame(A_np, index=cols, columns=cols)
     # Fallback to original implementation
     return build_adj(returns, max_lag=max_lag, min_abs_corr=min_abs_corr)
+
+
+#  edge sig
+def _pval_from_corr(r: float, n_eff: int) -> float:
+    if np.isnan(r):
+        return 1.0
+    t = r * np.sqrt((n_eff - 2) / (1 - r**2))
+    return 2 * (1 - norm.cdf(abs(t)))
+
+
+def fdr_bh_mask(pvals: np.ndarray, q: float = 0.1) -> np.ndarray:
+    """Benjamini-Hochberg FDR correction for multiple p-values."""
+    p = np.asarray(pvals).ravel()
+    n = p.size
+    order = np.argsort(p)
+    thresh = (np.arange(1, n + 1) / n) * q
+    below = p[order] <= thresh
+    cutoff = p[order][below].max() if below.any() else 0.0
+    return p <= cutoff
+
+
+def filter_edges_fdr(A: pd.DataFrame, n_eff: int, q: float = 0.1) -> pd.DataFrame:
+    pvals = A.map(lambda r: _pval_from_corr(r, n_eff))
+    mask = fdr_bh_mask(pvals, q=q).reshape(A.shape)
+    return A.where(mask, 0.0)

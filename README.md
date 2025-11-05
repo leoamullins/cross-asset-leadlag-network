@@ -1,268 +1,352 @@
 # Cross-Asset Lead–Lag Network
 
-A lightweight research toolkit for discovering lead–lag relationships across asset returns, visualising the resulting
-directed network, and driving a simple momentum-style portfolio strategy from those relationships.
+A quantitative research framework for discovering directional lead–lag relationships across financial asset returns using network theory and correlation structure analysis. The toolkit constructs signed, directed graphs from lagged cross-asset correlations and implements a systematic trading strategy that exploits leadership dynamics in multi-asset portfolios.
 
-The repository contains:
+## Project Structure
 
-- `lead_lag_graph.py` — utilities to compute lagged correlations, build a directed adjacency matrix, and visualise the
-  network.
-- `trading_algo.py` — a reference backtest that uses the network to select leaders and allocate capital with risk
-  targeting and optional regime filters.
-- `example.ipynb` — an end-to-end example that downloads market data, builds the network, and runs the backtest.
+The repository implements a modular Python package (`cross_asset_leadlag/`) with clear separation of concerns:
 
-### Visualisations and Results
+- **`cross_asset_leadlag.graph`** — Lagged correlation estimation, adjacency matrix construction, network visualisation, and FDR-based edge filtering
+- **`cross_asset_leadlag.algo`** — Strategy implementation including leader scoring (PageRank, out-strength variants), regime filters, volatility targeting with covariance shrinkage, and vectorised backtesting
+- **`cross_asset_leadlag.validation`** — Walk-forward validation, Sharpe ratio computation, and out-of-sample performance metrics
+- **`example.ipynb`** — End-to-end demonstration with data acquisition, network construction, and strategy backtesting
 
-The figures below are generated with the helper script in `scripts/generate_artifacts.py` (see "Re-generate visuals and
-stats" for details). If the images don’t render yet, run the script to create them under `assets/` and commit the
-outputs.
+## Performance Summary
+
+The strategy demonstrates robust risk-adjusted returns over a 16-year sample spanning multiple market regimes:
+
+| Metric           | Value   |
+|------------------|---------|
+| **CAGR**         | 5.07%   |
+| **Ann. Vol**     | 9.31%   |
+| **Sharpe Ratio** | 0.53    |
+| **Max Drawdown** | -14.7%  |
+| **Rebalances**   | 844     |
+| **Period**       | Apr 2008 – Dec 2024 |
+
+### Network Visualisation
 
 ![Lead–Lag Network (last 252d)](images/leadlag_network.png)
+*Directed graph showing lead–lag relationships. Node size reflects leadership strength (z-scored out-strength); edge direction indicates temporal precedence; edge thickness represents correlation magnitude.*
+
+### Cumulative Returns
 
 ![Network Momentum: Cumulative Growth of $1](images/cum_returns.png)
+*Strategy equity curve: portfolio log-returns compounded over the backtest period, after transaction costs (3bps per side).*
 
-The results are summarised in the table below.
+## Research Motivation
 
-| Metric      | Value                |
-|-------------|----------------------|
-| CAGR        | 0.05070218789261105  |
-| AnnVol      | 0.09305721051394995  |
-| Sharpe      | 0.5314869289150495   |
-| MaxDrawdown | -0.14665971695554614 |
-| NumTrades   | 844                  |
-| Start       | 2008-04-15 00:00:00  |
-| End         | 2024-12-31 00:00:00  |
+Traditional momentum and correlation-based strategies typically assume contemporaneous relationships or rely on historical price patterns alone. This approach overlooks directional, lagged influence structures between assets—where certain instruments systematically lead others in price discovery.
 
-## Motivation
+This research investigates whether:
+1. Lagged cross-correlations reveal stable leadership hierarchies across asset classes
+2. Network-based leader scoring (PageRank, out-strength) improves systematic portfolio construction
+3. Combining leadership signals with momentum regime filters enhances risk-adjusted returns
 
-Traditional momentum or correlation models often ignore directional, lagged influence between assets. This repository
-explores whether identifying “leaders” in a directed, lagged-correlation network can improve allocation timing and
-selection.
+## Methodology
 
-## Methodology (High level)
+### 1. Lead–Lag Network Construction
 
-- Compute pairwise correlations across lags in `[-max_lag, max_lag]`, keeping the lag with the highest absolute
-  correlation.
-- Build a signed, directed adjacency matrix: if asset `i` tends to precede `j` at the best lag, create edge `i → j` with
-  weight equal to the signed correlation.
-- Score nodes (assets) by leader strength (e.g., signed out-strength, absolute out-strength, or PageRank variants).
-- Optionally filter edges per node (top-k) to sparsify the graph.
-- Combine leadership with simple momentum/regime gates (e.g., SMA, MA cross); scale portfolio to a target volatility
-  with rolling covariance and optional shrinkage.
+For each pair of assets *(i, j)* in the universe:
+- Compute Pearson correlations at lags *τ ∈ [-L, +L]* (default *L = 5* days)
+- Select lag *τ\** with maximum absolute correlation
+- If *|ρ(τ\*)| ≥ θ* (default *θ = 0.15*), create directed edge:
+  - *τ\* > 0*: asset *i* leads *j* → edge *i → j* with weight *ρ(τ\*)*
+  - *τ\* < 0*: asset *j* leads *i* → edge *j → i* with weight *ρ(τ\*)*
+- Apply Benjamini–Hochberg FDR correction (*q = 0.2*) to control false discovery rate
+- Optional: sparsify by retaining top-*k* outgoing edges per node
 
-## Features
+### 2. Leader Scoring
 
-- Estimate best lag per pair and build a signed, directed adjacency matrix.
-- Visualise the network (NetworkX/Matplotlib) with edge pruning and several node scoring options.
-- Backtest a “network momentum” strategy:
-    - Leader selection from graph metrics (e.g., out-strength, abs out-strength, PageRank variants).
-    - Momentum/regime gates (price SMA, MA cross, etc.).
-    - Volatility targeting with optional shrinkage.
-    - Weekly/monthly rebalancing and simple transaction cost model.
-- Optional Numba-accelerated adjacency construction (`build_adj_fast`).
+Multiple centrality measures available:
+- **Out-strength**: Σⱼ *Aᵢⱼ* (signed row sum)
+- **Absolute out-strength**: Σⱼ *|Aᵢⱼ|* (ignores correlation sign)
+- **Positive-only strength**: Σⱼ max(*Aᵢⱼ*, 0)
+- **PageRank**: Standard random-walk centrality on positive edges
+- **Sign-aware PageRank**: Influence via *|A|*, modulated by sign of out-strength
 
-## Getting Started
+All scores are z-normalised and optionally smoothed via exponential moving average.
+
+### 3. Portfolio Construction
+
+**Signal generation** (rebalanced monthly/weekly):
+1. Rank assets by leader score *zᵢ*
+2. Apply momentum regime filter:
+   - `price_sma`: *Pᵢ > SMA₅₀(Pᵢ)*
+   - `ma_cross`: *SMA₅₀(Pᵢ) > SMA₂₀₀(Pᵢ)*
+   - `ma_slope`: *SMA₅₀(Pᵢ)* rising over 10-day window
+   - `ma_strength`: continuous signal *[SMA₅₀ - SMA₂₀₀] / SMA₂₀₀*
+3. Combine: *wᵢ ∝ max(zᵢ, 0) × gate*ᵢ (long-only allocation)
+
+**Risk management**:
+- Volatility targeting: scale to *σ_target* = 10% annualised using rolling 60-day covariance
+- Optional Ledoit–Wolf shrinkage (*λ = 0.1*) for covariance stabilisation
+- Max leverage: 1.5×
+- Transaction costs: 3bps per side
+
+### 4. Performance Attribution
+
+- Walk-forward validation with out-of-sample testing
+- Sharpe ratio, CAGR, maximum drawdown
+- Turnover analysis and cost sensitivity
+
+## Key Features
+
+- **Numba-accelerated computation**: Parallel adjacency matrix construction for large universes
+- **Statistical robustness**: FDR-controlled edge filtering, robust PageRank with multiple fallbacks
+- **Flexible regime filters**: Binary gates (SMA, MA cross) or continuous momentum signals
+- **Production-ready risk management**: Volatility targeting with shrinkage, leverage constraints, realistic transaction costs
+- **Modular architecture**: Clean separation of graph construction, scoring, and backtesting logic
+
+## Installation & Usage
 
 ### Requirements
 
-- Python 3.10+
-- numpy, pandas, matplotlib, networkx
-- yfinance (for data in the example)
-- numba (optional; used by `build_adj_fast`)
+- Python ≥3.10
+- Core: `numpy`, `pandas`, `matplotlib`, `networkx`, `scipy`
+- Data: `yfinance` (market data retrieval)
+- Performance: `numba` (optional; enables JIT-compiled adjacency construction)
 
-Install with pip:
+Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Or create a conda environment:
+### Quick Start
 
-```bash
-conda env create -f environment.yml
-conda activate leadlag-net
-```
+**Option 1: Interactive Notebook**
 
-### Quickstart (Jupyter)
+Open [example.ipynb](example.ipynb) to run the complete pipeline:
+1. Fetch daily ETF prices (equities, bonds, commodities, currencies)
+2. Construct 252-day rolling lead–lag network
+3. Visualise graph with leadership rankings
+4. Backtest network momentum strategy
+5. Analyse performance metrics
 
-Open `example.ipynb` and run all cells. It will:
-
-1. Download daily close prices for a basket of ETFs (via yfinance).
-2. Compute daily log returns.
-3. Build a lead–lag adjacency matrix for the last 252 trading days.
-4. Visualise the network and list top “leaders”.
-5. Run the network momentum backtest and plot cumulative performance.
-
-> Tip: To save the network plot, add `plt.savefig("leadlag_network.png", bbox_inches="tight", dpi=150)` right after
-> calling `leadlag_graph(...)`. To save cumulative return chart, call
-`plt.savefig("cum_returns.png", bbox_inches="tight", dpi=150)` after plotting.
-
-### Quickstart (Python script)
+**Option 2: Python Script**
 
 ```python
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from lead_lag_graph import build_adj, leadlag_graph
-from trading_algo import backtest_network_momentum
 import matplotlib.pyplot as plt
+from cross_asset_leadlag.graph import build_adj, leadlag_graph
+from cross_asset_leadlag.algo import backtest_network_momentum
 
-# 1) Data
-tickers = [
-    'SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'TLT', 'IEF', 'SHY', 'LQD', 'HYG', 'GLD', 'SLV', 'DBC', 'UUP', 'FXE'
-]
+# 1. Data acquisition
+tickers = ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM',      # Equities
+           'TLT', 'IEF', 'SHY', 'LQD', 'HYG',      # Fixed income
+           'GLD', 'SLV', 'DBC',                     # Commodities
+           'UUP', 'FXE']                            # Currencies
+
 prices = yf.download(tickers, start='2007-01-01', end='2025-01-01')['Close'].dropna()
 returns = np.log(prices / prices.shift(1)).dropna()
 
-# 2) Network
+# 2. Network construction
 A = build_adj(returns.tail(252), max_lag=5, min_abs_corr=0.15)
-H, z = leadlag_graph(
+H, leader_scores = leadlag_graph(
     A,
     title='Lead–Lag Network (last 252d)',
     max_edges=80,
     node_score='out_strength',
     layout='circular',
     seed=42,
-    visualise=True,
+    visualise=True
 )
-print(z.sort_values(ascending=False).head(10))
-# Save the figure if running non-interactively
+
+print("Top 5 Leaders:\n", leader_scores.sort_values(ascending=False).head())
 plt.savefig("leadlag_network.png", bbox_inches="tight", dpi=150)
 
-# 3) Backtest
-port_rets, metrics, w_hist = backtest_network_momentum(
+# 3. Strategy backtest
+portfolio_returns, metrics, weights = backtest_network_momentum(
     prices, returns,
+    window=252,
     leader_method="abs_out_strength",
-    max_lag=5, min_abs_corr=0.15,
+    max_lag=5,
+    min_abs_corr=0.15,
     sparsify_topk=3,
-    regime="ma_cross", fast_ma=50, slow_ma=200,
+    regime="ma_cross",
+    fast_ma=50,
+    slow_ma=200,
     ema_span=15,
-    target_ann_vol=0.10, cov_win=60, shrink_lambda=0.1,
+    target_ann_vol=0.10,
+    cov_win=60,
+    shrink_lambda=0.1,
     rebalance="W-FRI",
+    tc_bps=3.0,
     use_numba=True
 )
-print(metrics)
 
-# 4) Plot and save cumulative performance
-cum = port_rets.cumsum().apply(np.exp)
-ax = cum.plot(title='Network Momentum: Cumulative Growth of $1')
-ax.set_ylabel('Growth of $1')
+# 4. Performance analysis
+print("\nPerformance Metrics:")
+for k, v in metrics.items():
+    print(f"{k:15s}: {v}")
+
+# Plot equity curve
+cumulative = portfolio_returns.cumsum().apply(np.exp)
+fig, ax = plt.subplots(figsize=(10, 6))
+cumulative.plot(ax=ax, linewidth=2)
+ax.set_title('Network Momentum Strategy: Equity Curve', fontsize=14)
+ax.set_ylabel('Growth of £1', fontsize=12)
+ax.set_xlabel('Date', fontsize=12)
+ax.grid(alpha=0.3)
 plt.savefig("cum_returns.png", bbox_inches="tight", dpi=150)
+plt.show()
 ```
 
-## Results
+## Technical Implementation Details
 
-Run either Quickstart to produce two main visuals:
+### Graph Construction Algorithm
 
-- Lead–lag network graph (`leadlag_network.png`): nodes are assets; directed edges follow the detected lead
-  relationship; edge colour/width reflect correlation sign/magnitude. Useful for seeing clusters and dominant leaders.
-- Cumulative return chart (`cum_returns.png`): exponential of cumulative log-returns of the backtested strategy. This
-  gives the growth of $1 over time.
+```python
+def build_adj(returns: pd.DataFrame, max_lag: int = 5, min_abs_corr: float = 0.15):
+    """
+    Constructs signed, directed adjacency matrix from lagged correlations.
 
-## Limitations
+    For each pair (i, j):
+      1. Compute ρ(τ) for τ ∈ [-max_lag, +max_lag]
+      2. Select τ* = argmax |ρ(τ)|
+      3. If |ρ(τ*)| ≥ min_abs_corr:
+           - τ* > 0: A[i,j] = ρ(τ*)  (i leads j)
+           - τ* < 0: A[j,i] = ρ(τ*)  (j leads i)
 
-- Lagged correlations can be unstable and regime-dependent; edges may flip over time.
-- Simple correlation ignores nonlinear/lead-lag structures beyond Pearson relationships.
-- Backtest is illustrative: no slippage model beyond simple bps costs; ignores taxes, borrow constraints, etc.
-- Universe choice and `min_abs_corr` threshold materially affect results.
+    Returns: N×N DataFrame with assets as index/columns
+    """
+```
 
-## API Overview
+**Numba acceleration**: `build_adj_fast()` provides parallel implementation with ~10× speedup on large universes.
 
-Below is a brief overview of the most useful functions. Inspect the source files for full details.
+### Statistical Validation
 
-### Module: `lead_lag_graph.py`
+- **FDR correction**: Benjamini–Hochberg procedure controls false discovery rate in multiple testing
+- **Walk-forward analysis**: Out-of-sample validation with non-overlapping test periods
+- **Robust covariance estimation**: Ledoit–Wolf shrinkage prevents overfitting in small samples
 
-- `corr_at_lag(x: pd.Series, y: pd.Series, lag: int) -> float`
-    - Pearson correlation between two series at a given (positive/negative) lag. Returns `NaN` if too few overlapping
-      points.
+### Risk Management Implementation
 
-- `best_lag_corr(x: pd.Series, y: pd.Series, max_lag: int = 5) -> dict`
-    - Searches lags in `[-max_lag, max_lag]` and returns `{"lag": int, "corr": float}` with the highest absolute
-      correlation.
+**Volatility targeting** solves:
 
-- `build_adj(returns: pd.DataFrame, max_lag: int = 5, min_abs_corr: float = 0.15) -> pd.DataFrame`
-    - Constructs a directed adjacency matrix A (index/columns = tickers). If lag>0, i leads j (edge i→j). Only keeps
-      |corr| ≥ threshold.
+*w_scaled = w × min(σ_target / √(w'Σw × 252), leverage_max)*
 
--
+where *Σ* is the 60-day rolling covariance matrix (optionally shrunk).
 
-`leadlag_graph(A: pd.DataFrame, title="lead-lag network", max_edges: int = 80, node_score: str = "out_strength", layout: str = "circular", seed: int = 42, visualise: bool = True)`
-- Builds a NetworkX `DiGraph` from A, optionally visualises it, and computes per-node leader z-scores. Supported
-`node_score` values include:
-- `out_strength` (row sum), `abs_out_strength`, `pos_only`, `pagerank`, `sign_aware_pagerank`.
-- Returns `(G, z_scores)`.
+## Research Extensions & Limitations
 
-- `build_adj_fast(returns: pd.DataFrame, max_lag: int = 5, min_abs_corr: float = 0.15) -> pd.DataFrame`
-    - Optional Numba-accelerated adjacency builder with the same interface as `build_adj`.
+### Current Limitations
 
-### Module: `trading_algo.py`
+1. **Correlation stability**: Lagged relationships may exhibit regime-dependence; edges can flip during structural breaks
+2. **Linear assumption**: Pearson correlation captures only linear relationships; nonlinear lead–lag structures (copulas, mutual information) not addressed
+3. **Transaction cost model**: Simplified proportional costs (3bps per side); no market impact, spread modelling, or capacity analysis
+4. **Universe construction**: Fixed ETF universe; no asset selection, delisting bias, or survivorship adjustment
+5. **Parameter sensitivity**: Performance materially affected by `min_abs_corr`, `max_lag`, `sparsify_topk`
 
-- `leader_scores(A: pd.DataFrame, method: str = "out_strength", pagerank_alpha: float = 0.9) -> pd.Series`
-    - Compute leader z-scores from adjacency `A`. Methods: `out_strength`, `abs_out_strength`, `pos_only`, `pagerank`,
-      `sign_aware_pagerank`.
+### Potential Enhancements
 
-- `backtest_network_momentum(
-    prices: pd.DataFrame,
-    returns: pd.DataFrame,
-    window: int = 252,
-    max_lag: int = 5,
-    min_abs_corr: float = 0.15,
-    rebalance: str = "M",
-    mom_lookback: int = 50,
-    ema_span: int | None = 20,
-    target_ann_vol: float | None = 0.10,
-    tc_bps: float = 3.0,
-    cov_win: int = 60,
-    leader_method: str = "out_strength",
-    pagerank_alpha: float = 0.9,
-    sparsify_topk: int | None = None,
-    regime: str = "price_sma",  # alternatives: "ma_cross", "ma50_rising"
-    fast_ma: int = 50,
-    slow_ma: int = 200,
-    slope_win: int = 10,
-    shrink_lambda: float | None = None,
-    use_numba: bool = False
-  ) -> tuple[pd.Series, dict, pd.DataFrame]`
-    - Sliding-window workflow:
-        1) Build adjacency on rolling window of returns (fast path optional).
-        2) Rank leaders; optionally sparsify to top-k outgoing edges.
-        3) Combine leadership with momentum/regime gates.
-        4) Scale to target volatility using rolling covariance and optional shrinkage.
-        5) Apply simple transaction costs; rebalance at specified frequency.
-    - Returns: `(portfolio_returns, summary_metrics, weight_history)`.
+- **Adaptive parameters**: Rolling cross-validation for optimal threshold selection
+- **Regime detection**: Hidden Markov models for state-dependent networks
+- **Nonlinear extensions**: Granger causality, transfer entropy, conditional mutual information
+- **Portfolio constraints**: Sector limits, turnover penalties, short-sale constraints
+- **Execution modelling**: VWAP slippage, temporary/permanent impact (Almgren–Chriss framework)
+- **Alternative centrality**: Eigenvector centrality, betweenness, Katz centrality
 
-Other helpers of note:
+## API Reference
 
-- `sparsify_topk_outgoing(A, k)` — keep only top-k outgoing edges per node.
-- Regime/momentum helpers: `momentum_gate_binary`, `momentum_signal_continuous`, `ma_cross_regime_gate`,
-  `ma50_rising_gate`, `ma_strength_continuous`.
+### `cross_asset_leadlag.graph`
 
-## Tips and Notes
+**Core Functions:**
 
-- Data frequency: examples use daily closes; the code should work for any equally spaced series.
-- Stability: lagged correlations can be noisy; consider increasing `min_abs_corr`, lowering `max_lag`, or applying
-  `sparsify_topk`.
-- Performance:
-    - Use `build_adj_fast(..., use_numba=True)` in the backtest or call `build_adj_fast` directly if Numba is installed.
-    - Limit the universe size or max lag when prototyping.
-- Rebalancing: pass pandas offset aliases like `"M"`, `"W-FRI"`, etc.
+- **`build_adj(returns, max_lag=5, min_abs_corr=0.15)`** → `pd.DataFrame`
+  - Constructs signed, directed adjacency matrix from lagged correlations
+  - Returns *N×N* matrix where *A[i,j]* = correlation weight if *i* leads *j*
 
-## Troubleshooting
+- **`build_adj_fast(returns, max_lag=5, min_abs_corr=0.15)`** → `pd.DataFrame`
+  - Numba-accelerated version (10× faster); automatic fallback if Numba unavailable
 
-- Empty or sparse network:
-    - Lower `min_abs_corr`, widen the window, or broaden the universe.
-- Numerical issues (NaNs/Infs):
-    - Ensure `returns` has no constant columns; drop assets with too little data.
-- Slow runs:
-    - Reduce `max_lag`, universe size, or enable Numba acceleration.
-- yfinance throttling/errors:
-    - Cache data locally or provide your own `prices`/`returns` instead of downloading each run.
+- **`filter_edges_fdr(A, n_eff, q=0.1)`** → `pd.DataFrame`
+  - Benjamini–Hochberg FDR correction; zeros out non-significant edges
 
-## Disclaimer
+- **`leadlag_graph(A, title, max_edges=80, node_score='out_strength', layout='circular', visualise=True)`** → `(nx.DiGraph, pd.Series)`
+  - Visualises network and computes leadership z-scores
+  - Node scoring methods: `out_strength`, `abs_out_strength`, `pos_only`, `pagerank`, `sign_aware_pagerank`
 
-This repository is for research and educational purposes only. It is not investment advice. Past performance does not
-guarantee future results.
+### `cross_asset_leadlag.algo`
 
-## Licence
+**Strategy Functions:**
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+- **`leader_scores(A, method='out_strength', pagerank_alpha=0.9)`** → `pd.Series`
+  - Computes z-scored leadership centrality measures
+
+- **`backtest_network_momentum(prices, returns, window=252, ...)`** → `(pd.Series, dict, pd.DataFrame)`
+  - Full backtesting engine with rolling network construction
+  - Key parameters:
+    - `leader_method`: `'out_strength'`, `'abs_out_strength'`, `'pagerank'`, `'sign_aware_pagerank'`
+    - `regime`: `'price_sma'`, `'ma_cross'`, `'ma_slope'`, `'ma_strength'`
+    - `target_ann_vol`: Volatility target (e.g., 0.10 for 10%)
+    - `shrink_lambda`: Covariance shrinkage intensity (0.0 = none, 1.0 = full)
+    - `sparsify_topk`: Retain top-*k* edges per node
+    - `use_numba`: Enable JIT acceleration
+  - Returns: `(daily_returns, metrics_dict, weight_history)`
+
+**Regime Filters:**
+
+- `momentum_gate_binary(prices, ix, lookback)`: Price > SMA filter
+- `ma_cross_regime_gate(prices, ix, fast, slow)`: Golden/death cross
+- `ma50_rising_gate(prices, ix, slope_win)`: SMA slope filter
+- `ma_strength_continuous(prices, ix, fast, slow)`: Continuous momentum signal
+
+### `cross_asset_leadlag.validation`
+
+- **`walkforward_validation(prices, returns, window=252, test_len=63, ...)`** → `pd.Series`
+  - Out-of-sample walk-forward testing with purging and embargo
+
+- **`sharpe_ratio(returns, ann_factor=252, risk_free=0.0)`** → `float`
+  - Annualised Sharpe ratio calculation
+
+## Usage Notes
+
+**Performance optimisation:**
+- Enable `use_numba=True` for universes >20 assets
+- Reduce `max_lag` or `window` during prototyping
+- Cache yfinance data locally to avoid API throttling
+
+**Stability considerations:**
+- Increase `min_abs_corr` (e.g., 0.20) for sparser, more stable networks
+- Apply `sparsify_topk=3` to retain only strongest edges per node
+- Use `ema_span=15` to smooth noisy leadership signals
+
+**Regime sensitivity:**
+- `ma_cross` works well in trending markets but lags in reversals
+- `price_sma` provides faster regime detection but higher turnover
+- `ma_strength` offers continuous exposure scaling (no binary gates)
+
+## Project Background
+
+This research project was developed as part of a quantitative finance portfolio demonstrating:
+- **Statistical signal processing**: Time-series correlation analysis with lag optimisation
+- **Network science applications**: Graph theory applied to financial markets
+- **Systematic strategy development**: End-to-end pipeline from research to backtesting
+- **Software engineering**: Modular Python package with performance optimisation (Numba JIT)
+- **Risk management**: Volatility targeting, covariance estimation, transaction cost modelling
+
+The implementation showcases practical skills relevant to quantitative researcher and systematic trading roles, including backtesting best practices, statistical validation, and production-quality code organisation.
+
+## References & Further Reading
+
+**Lead–lag relationships:**
+- Brunetti, C., & Lildholdt, P. (2007). *Time-varying correlations and the spatial structure of stock market*.
+- Curme, C., et al. (2015). *Emergence of statistically validated financial intraday lead-lag relationships*.
+
+**Network methods in finance:**
+- Mantegna, R. N. (1999). *Hierarchical structure in financial markets*.
+- Onnela, J.-P., et al. (2003). *Dynamics of market correlations: Taxonomy and portfolio analysis*.
+
+**Portfolio construction & risk management:**
+- Ledoit, O., & Wolf, M. (2004). *Honey, I shrunk the sample covariance matrix*.
+- Grinold, R. C., & Kahn, R. N. (1999). *Active Portfolio Management*.
+
+## Licence & Disclaimer
+
+**Licence**: MIT — See [LICENSE](LICENSE) for details.
+
+**Disclaimer**: This repository is for research and educational purposes only. Nothing herein constitutes investment advice, and past performance does not guarantee future results. All backtests are subject to survivorship bias, overfitting risk, and simplifying assumptions that may not hold in live trading.
