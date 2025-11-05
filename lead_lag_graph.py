@@ -144,33 +144,43 @@ def leadlag_graph(
         pandas Series representing the z-scored node importance scores (leaders and
         followers).
     """
+    # Build base graph from adjacency (ignore zero-weight entries)
     G = nx.from_pandas_adjacency(A, create_using=nx.DiGraph)
 
     edges = [(u, v, d["weight"]) for u, v, d in G.edges(data=True)]
-    if not edges:
-        print("No edges to display (A is empty).")
-        return
-    edges_sorted = sorted(edges, key=lambda x: abs(x[2]), reverse=True)[:max_edges]
 
+    # Prepare the pruned display graph H (keeps all nodes; subset of edges)
     H = nx.DiGraph()
     H.add_nodes_from(G.nodes())
-    for u, v, w in edges_sorted:
-        H.add_edge(u, v, weight=w)
 
-    # node leadership
+    if edges:
+        edges_sorted = sorted(edges, key=lambda x: abs(x[2]), reverse=True)[:max_edges]
+        for u, v, w in edges_sorted:
+            H.add_edge(u, v, weight=w)
+
+    # Node leadership scoring (if no edges, scores default to 0)
     if node_score == "pagerank":
-        pr = nx.pagerank(H, alpha=0.9, weight="weight")
-        score = pd.Series(pr)
+        if H.number_of_edges() == 0:
+            score = pd.Series(0.0, index=list(H.nodes()))
+        else:
+            pr = nx.pagerank(H, alpha=0.9, weight="weight")
+            score = pd.Series(pr)
     else:
-        # out-strength (sum of outgoing weights)
         out_strength = {n: 0.0 for n in H.nodes()}
         for u, v, d in H.edges(data=True):
-            out_strength[u] += d["weight"]
+            out_strength[u] += d.get("weight", 0.0)
         score = pd.Series(out_strength)
 
-    # normalise
-    s = (score - score.mean()) / (score.std() if score.std() > 0 else 1.0)
-    node_sizes = (s.clip(lower=0) + 0.2) * 1200  # leaders bigger
+    # Normalise to z-scores (robust to zero-variance)
+    mu = score.mean() if len(score) else 0.0
+    sd = score.std() if len(score) else 0.0
+    if sd and not np.isnan(sd):
+        s = (score - mu) / sd
+    else:
+        s = score - mu
+    s.name = "leader_z"
+
+    node_sizes = (s.clip(lower=0) + 0.2) * 1200  # leaders bigger, min size
     node_colors = s  # positive=leaders, negative=followers
 
     # layout
@@ -186,10 +196,7 @@ def leadlag_graph(
     # edge style
     weights = np.array([abs(H[u][v]["weight"]) for u, v in H.edges()])
     if weights.size:
-        # scale edge widths
-        ew = 1.0 + 4.0 * (weights - weights.min()) / (
-            np.ptp(weights) if np.ptp(weights) > 0 else 1.0
-        )
+        ew = 1.0 + 4.0 * (weights - weights.min()) / (np.ptp(weights) if np.ptp(weights) > 0 else 1.0)
     else:
         ew = 1.5
 
@@ -202,18 +209,24 @@ def leadlag_graph(
             node_color=[node_colors.get(n, 0.0) for n in H.nodes()],
             cmap="coolwarm",
         )
-        edges = nx.draw_networkx_edges(
-            H, pos, arrowstyle="->", arrowsize=12, width=ew, edge_color="#555"
-        )
-        labels = nx.draw_networkx_labels(H, pos, font_size=9)
+        if H.number_of_edges() > 0:
+            nx.draw_networkx_edges(H, pos, arrowstyle="->", arrowsize=12, width=ew, edge_color="#555")
+        nx.draw_networkx_labels(H, pos, font_size=9)
 
-        cbar = plt.colorbar(nodes, shrink=0.8, pad=0.02)
-        cbar.set_label("Leader score (z-scored)", rotation=270, labelpad=12)
+        if len(H):
+            cbar = plt.colorbar(nodes, shrink=0.8, pad=0.02)
+            cbar.set_label("Leader score (z-scored)", rotation=270, labelpad=12)
 
-        plt.title(title)
+        subtitle = None
+        if G.number_of_edges() == 0:
+            subtitle = "No edges passed the correlation/lag threshold; showing nodes only."
+        elif H.number_of_edges() == 0:
+            subtitle = "Edges were pruned by max_edges/top-k; showing nodes only."
+
+        plt.title(title + ("\n" + subtitle if subtitle else ""))
         plt.axis("off")
         plt.tight_layout()
-        plt.show()
+        # Do not call plt.show() here; let caller decide (prevents empty saved figures)
 
     return H, s
 

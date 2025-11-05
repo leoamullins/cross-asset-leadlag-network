@@ -1,0 +1,15 @@
+# Core scientific stack
+numpy>=1.23
+pandas>=1.5
+matplotlib>=3.6
+networkx>=2.8
+
+# Data
+yfinance>=0.2.36
+
+# Optional performance acceleration (used by build_adj_fast)
+numba>=0.58
+
+# Optional: Jupyter for running the example notebook
+# jupyter
+# ipykernel
