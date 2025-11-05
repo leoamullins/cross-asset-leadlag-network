@@ -10,7 +10,20 @@ MAX_LAG = 5
 
 # calc corr
 def corr_at_lag(x: pd.Series, y: pd.Series, lag: int) -> float:
-    """Correlation between x_t and y_{t+lag}"""
+    """
+    Calculates the Pearson correlation coefficient between two pandas Series at a given lag. The function aligns the
+    input series based on the specified lag, removes missing values, and computes the correlation.
+
+    Args:
+        x (pd.Series): The first time series.
+        y (pd.Series): The second time series.
+        lag (int): The lag value used to offset one of the series. Positive lag shifts `y` forward, negative lag shifts
+            `x` forward, and zero lag computes the correlation without shifting.
+
+    Returns:
+        float: The Pearson correlation coefficient between the two input series at the specified lag. If there are fewer
+        than 5 aligned non-missing points, returns NaN.
+    """
     if lag > 0:
         x_, y_ = x.iloc[:-lag], y.iloc[lag:]
     elif lag < 0:
@@ -26,6 +39,21 @@ def corr_at_lag(x: pd.Series, y: pd.Series, lag: int) -> float:
 
 
 def best_lag_corr(x: pd.Series, y: pd.Series, max_lag: int = MAX_LAG):
+    """
+    Calculates the best lag with the highest correlation between two time series up to a specified maximum lag. It iterates
+    through the possible lags within the range [-max_lag, max_lag], computes the correlation for each lag, and identifies
+    the lag with the highest absolute correlation. The result includes both the lag and the corresponding correlation value.
+
+    Args:
+        x (pd.Series): The first time series.
+        y (pd.Series): The second time series.
+        max_lag (int, optional): The maximum absolute lag to consider. Defaults to MAX_LAG.
+
+    Returns:
+        dict: A dictionary containing the best lag and its corresponding correlation with keys:
+            - "lag" (int): The lag with the highest absolute correlation.
+            - "corr" (float): The correlation value at the best lag.
+    """
     best = {"lag": 0, "corr": np.nan}
     best_abs = -np.inf
     for lag in range(-max_lag, max_lag + 1):
@@ -42,6 +70,25 @@ def best_lag_corr(x: pd.Series, y: pd.Series, max_lag: int = MAX_LAG):
 def build_adj(
     returns: pd.DataFrame, max_lag: int = MAX_LAG, min_abs_corr: float = 0.15
 ):
+    """
+    Constructs an adjacency matrix representing the correlation structure among time series
+    data with specified maximum lag and minimum absolute correlation threshold. The matrix
+    reveals leading and following relationships between time series based on their
+    calculated lags and correlations.
+
+    Args:
+        returns (pd.DataFrame): A DataFrame where each column represents a time series,
+            and rows correspond to time steps.
+        max_lag (int): The maximum lag to consider when calculating correlations between
+            the time series. Defaults to MAX_LAG.
+        min_abs_corr (float): The minimum absolute correlation value required to consider
+            inclusion in the adjacency matrix. Defaults to 0.15.
+
+    Returns:
+        pd.DataFrame: An adjacency matrix where entries represent the correlation magnitude
+            and direction between time series, with non-zero entries indicating meaningful
+            relationships based on the provided threshold.
+    """
     cols = list(returns.columns)
     N = len(cols)
     A = pd.DataFrame(0.0, index=cols, columns=cols)
@@ -74,6 +121,29 @@ def leadlag_graph(
     seed: int = 42,
     visualise: bool = True,
 ):
+    """
+    Generates a directed graph from a given adjacency matrix and visualizes it as a
+    lead-lag network by filtering the most significant edges and applying a scoring
+    metric to determine node importance.
+
+    Args:
+        A (pd.DataFrame): Input adjacency matrix representing the graph.
+        title (str): Title for the visualized graph. Default is "lead-lag network".
+        max_edges (int): Maximum number of edges to display, sorted by weight.
+            Default is 80.
+        node_score (str): Method for scoring nodes to determine importance. Options
+            include "pagerank" or "out_strength". Default is "out_strength".
+        layout (str): Layout algorithm for visualizing the graph. Options include
+            "spring", "kamada_kawai", "circular". Default is "circular".
+        seed (int): Random seed for layout reproducibility (used in spring layout
+            algorithm). Default is 42.
+        visualise (bool): Whether to display the graph visualization. Default is True.
+
+    Returns:
+        tuple: A tuple containing the filtered directed graph (nx.DiGraph) and a
+        pandas Series representing the z-scored node importance scores (leaders and
+        followers).
+    """
     G = nx.from_pandas_adjacency(A, create_using=nx.DiGraph)
 
     edges = [(u, v, d["weight"]) for u, v, d in G.edges(data=True)]
