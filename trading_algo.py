@@ -1,11 +1,12 @@
-import json
-
 import networkx as nx
 import numpy as np
 import pandas as pd
-import yfinance as yf
 
-from lead_lag_graph import build_adj, build_adj_fast
+from lead_lag_graph import (
+    build_adj,
+    build_adj_fast,
+    filter_edges_fdr,
+)
 
 MAX_LAG = 5
 
@@ -23,7 +24,34 @@ def leader_scores(
         if G.number_of_edges() == 0:
             s = pd.Series(0.0, index=A.index)
         else:
-            pr = nx.pagerank(G, alpha=pagerank_alpha, weight="weight")
+            # Provide stable defaults and robust fallbacks to avoid convergence failures
+            try:
+                n_nodes = G.number_of_nodes()
+                dangling = {node: 1.0 / n_nodes for node in G}
+            except Exception:
+                dangling = None
+            try:
+                pr = nx.pagerank(
+                    G,
+                    alpha=pagerank_alpha,
+                    weight="weight",
+                    max_iter=2000,
+                    tol=1.0e-6,
+                    dangling=dangling,
+                )
+            except nx.PowerIterationFailedConvergence:
+                # Fallback 1: numpy-based PageRank (eigenvector solver)
+                try:
+                    pr = nx.pagerank_numpy(G, alpha=pagerank_alpha, weight="weight")
+                except Exception:
+                    # Fallback 2: use normalized positive out-strengths
+                    s_out = A.clip(lower=0.0).sum(axis=1)
+                    total = float(s_out.sum()) if np.isfinite(s_out.sum()) else 0.0
+                    if total <= 0.0:
+                        s = pd.Series(0.0, index=A.index)
+                    else:
+                        s = (s_out / total).reindex(A.index).fillna(0.0)
+                    pr = s.to_dict()
             s = pd.Series(pr).reindex(A.index).fillna(0.0)
     elif method == "abs_out_strength":
         s = A.abs().sum(axis=1)
@@ -35,7 +63,34 @@ def leader_scores(
         if G.number_of_edges() == 0:
             infl = pd.Series(0.0, index=A.index)
         else:
-            pr = nx.pagerank(G, alpha=pagerank_alpha, weight="weight")
+            # Use robust PageRank with fallbacks as above
+            try:
+                n_nodes = G.number_of_nodes()
+                dangling = {node: 1.0 / n_nodes for node in G}
+            except Exception:
+                dangling = None
+            try:
+                pr = nx.pagerank(
+                    G,
+                    alpha=pagerank_alpha,
+                    weight="weight",
+                    max_iter=2000,
+                    tol=1.0e-6,
+                    dangling=dangling,
+                )
+            except nx.PowerIterationFailedConvergence:
+                try:
+                    pr = nx.pagerank_numpy(G, alpha=pagerank_alpha, weight="weight")
+                except Exception:
+                    # Fallback: degree-based influence on |A|
+                    s_out = A.abs().sum(axis=1)
+                    total = float(s_out.sum()) if np.isfinite(s_out.sum()) else 0.0
+                    if total <= 0.0:
+                        infl = pd.Series(0.0, index=A.index)
+                        pr = infl.to_dict()
+                    else:
+                        infl = (s_out / total).reindex(A.index).fillna(0.0)
+                        pr = infl.to_dict()
             infl = pd.Series(pr).reindex(A.index).fillna(0.0)
         sign = A.sum(axis=1).apply(lambda x: 1.0 if x > 0 else (-1.0 if x < 0 else 0.0))
         s = infl * sign
@@ -228,6 +283,9 @@ def backtest_network_momentum(
         A = (build_adj_fast if use_numba else build_adj)(
             sample, max_lag=max_lag, min_abs_corr=min_abs_corr
         )
+
+        A = filter_edges_fdr(A, n_eff=sample.shape[0], q=0.2)
+
         # optional sparsification of outgoing edges per node
         if sparsify_topk is not None and sparsify_topk > 0:
             A = sparsify_topk_outgoing(A, sparsify_topk)
@@ -325,52 +383,8 @@ def backtest_network_momentum(
         "Start": str(port_rets.index[0]),
         "End": str(port_rets.index[-1]),
     }
-    with open("metrics.json", "w") as f:
-        json.dump(metrics, f, indent=4)
+    # with open("metrics.json", "w") as f:
+    #     json.dump(metrics, f, indent=4)
 
     w_hist = pd.DataFrame(w_records)
     return port_rets, metrics, w_hist
-
-
-if __name__ == "__main__":
-    # Example usage: download data and run a quick backtest demo
-    tickers = [
-        "SPY",
-        "QQQ",
-        "IWM",
-        "EFA",
-        "EEM",
-        "TLT",
-        "IEF",
-        "SHY",
-        "LQD",
-        "HYG",
-        "GLD",
-        "SLV",
-        "DBC",
-        "UUP",
-        "FXE",
-    ]
-
-    prices = yf.download(tickers, start="2007-01-01", end="2025-01-01")[
-        "Close"
-    ].dropna()
-    returns = np.log(prices / prices.shift(1)).dropna()
-
-    port_rets, metrics, w_hist = backtest_network_momentum(
-        prices=prices,
-        returns=returns,
-        window=252,
-        max_lag=5,
-        min_abs_corr=0.25,
-        rebalance="M",
-        mom_lookback=50,
-        ema_span=20,
-        target_ann_vol=0.10,
-        tc_bps=3.0,
-        cov_win=60,
-    )
-
-    print("Backtest metrics:")
-    for k, v in metrics.items():
-        print(f"  {k}: {v}")

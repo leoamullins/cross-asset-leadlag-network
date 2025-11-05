@@ -187,8 +187,9 @@ Below is a brief overview of the most useful functions. Inspect the source files
 -
 
 `leadlag_graph(A: pd.DataFrame, title="lead-lag network", max_edges: int = 80, node_score: str = "out_strength", layout: str = "circular", seed: int = 42, visualise: bool = True)`
+
 - Builds a NetworkX `DiGraph` from A, optionally visualises it, and computes per-node leader z-scores. Supported
-`node_score` values include:
+  `node_score` values include:
 - `out_strength` (row sum), `abs_out_strength`, `pos_only`, `pagerank`, `sign_aware_pagerank`.
 - Returns `(G, z_scores)`.
 

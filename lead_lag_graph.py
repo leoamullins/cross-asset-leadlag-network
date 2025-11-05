@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 WINDOW = 252
 REBAL_FREQ = "M"
@@ -196,7 +197,9 @@ def leadlag_graph(
     # edge style
     weights = np.array([abs(H[u][v]["weight"]) for u, v in H.edges()])
     if weights.size:
-        ew = 1.0 + 4.0 * (weights - weights.min()) / (np.ptp(weights) if np.ptp(weights) > 0 else 1.0)
+        ew = 1.0 + 4.0 * (weights - weights.min()) / (
+            np.ptp(weights) if np.ptp(weights) > 0 else 1.0
+        )
     else:
         ew = 1.5
 
@@ -210,7 +213,9 @@ def leadlag_graph(
             cmap="coolwarm",
         )
         if H.number_of_edges() > 0:
-            nx.draw_networkx_edges(H, pos, arrowstyle="->", arrowsize=12, width=ew, edge_color="#555")
+            nx.draw_networkx_edges(
+                H, pos, arrowstyle="->", arrowsize=12, width=ew, edge_color="#555"
+            )
         nx.draw_networkx_labels(H, pos, font_size=9)
 
         if len(H):
@@ -219,7 +224,9 @@ def leadlag_graph(
 
         subtitle = None
         if G.number_of_edges() == 0:
-            subtitle = "No edges passed the correlation/lag threshold; showing nodes only."
+            subtitle = (
+                "No edges passed the correlation/lag threshold; showing nodes only."
+            )
         elif H.number_of_edges() == 0:
             subtitle = "Edges were pruned by max_edges/top-k; showing nodes only."
 
@@ -338,3 +345,28 @@ def build_adj_fast(
         return pd.DataFrame(A_np, index=cols, columns=cols)
     # Fallback to original implementation
     return build_adj(returns, max_lag=max_lag, min_abs_corr=min_abs_corr)
+
+
+#  edge sig
+def _pval_from_corr(r: float, n_eff: int) -> float:
+    if np.isnan(r):
+        return 1.0
+    t = r * np.sqrt((n_eff - 2) / (1 - r**2))
+    return 2 * (1 - norm.cdf(abs(t)))
+
+
+def fdr_bh_mask(pvals: np.ndarray, q: float = 0.1) -> np.ndarray:
+    """Benjamini-Hochberg FDR correction for multiple p-values."""
+    p = np.asarray(pvals).ravel()
+    n = p.size
+    order = np.argsort(p)
+    thresh = (np.arange(1, n + 1) / n) * q
+    below = p[order] <= thresh
+    cutoff = p[order][below].max() if below.any() else 0.0
+    return p <= cutoff
+
+
+def filter_edges_fdr(A: pd.DataFrame, n_eff: int, q: float = 0.1) -> pd.DataFrame:
+    pvals = A.map(lambda r: _pval_from_corr(r, n_eff))
+    mask = fdr_bh_mask(pvals, q=q).reshape(A.shape)
+    return A.where(mask, 0.0)
