@@ -1,5 +1,9 @@
 # Cross-Asset Lead–Lag Network
 
+![python](https://img.shields.io/badge/python-3.11-informational)
+![license](https://img.shields.io/badge/license-MIT-blue)
+![status](https://img.shields.io/badge/status-research--ready-success)
+
 A quantitative research framework for discovering directional lead–lag relationships across financial asset returns using network theory and correlation structure analysis. The toolkit constructs signed, directed graphs from lagged cross-asset correlations and implements a systematic trading strategy that exploits leadership dynamics in multi-asset portfolios.
 
 ## Project Structure
