@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
-
-from .algo import backtest_network_momentum
+from algo import backtest_network_momentum
 
 
 def walkforward_validation(
@@ -11,7 +10,7 @@ def walkforward_validation(
     test_len: int = 63,
     purge: int = 5,
     embargo: int = 5,
-    **kwargs
+    **kwargs,
 ):
     n = len(prices)
     test_starts = np.arange(window, n - test_len, test_len)
@@ -24,10 +23,7 @@ def walkforward_validation(
         if len(p_test) == 0:
             continue
         port_rets, _, _ = backtest_network_momentum(
-            prices=pd.concat([p_train, p_test]),
-            returns=pd.concat([r_train, r_test]),
-            window=window,
-            **kwargs
+            prices=pd.concat([p_train, p_test]), returns=pd.concat([r_train, r_test]), window=window, **kwargs
         )
 
         oos_rets = port_rets.loc[p_test.index[0] : p_test.index[-1]]
@@ -35,9 +31,7 @@ def walkforward_validation(
     return pd.concat(all_rets).sort_index()
 
 
-def sharpe_ratio(
-    returns: pd.Series, ann_factor: int = 252, risk_free: float = 0.0
-) -> float:
+def sharpe_ratio(returns: pd.Series, ann_factor: int = 252, risk_free: float = 0.0) -> float:
     """Compute annualised Sharpe ratio."""
     excess = returns - risk_free / ann_factor
     mu = excess.mean()

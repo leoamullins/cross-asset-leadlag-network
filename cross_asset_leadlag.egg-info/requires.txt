@@ -1,0 +1,17 @@
+numpy>=1.23
+pandas>=1.5
+matplotlib>=3.6
+networkx>=2.8
+numba>=0.58
+yfinance>=0.2.36
+
+[dev]
+pytest>=7.0
+pytest-cov>=4.0
+black>=23.0
+ruff>=0.1.0
+mypy>=1.0
+
+[notebook]
+jupyter>=1.0
+ipykernel>=6.0

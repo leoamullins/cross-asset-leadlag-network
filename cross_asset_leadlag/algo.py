@@ -3,8 +3,7 @@ import json
 import networkx as nx
 import numpy as np
 import pandas as pd
-
-from .graph import (
+from graph import (
     build_adj,
     build_adj_fast,
     filter_edges_fdr,
@@ -13,9 +12,7 @@ from .graph import (
 MAX_LAG = 5
 
 
-def leader_scores(
-    A: pd.DataFrame, method: str = "out_strength", pagerank_alpha: float = 0.9
-) -> pd.Series:
+def leader_scores(A: pd.DataFrame, method: str = "out_strength", pagerank_alpha: float = 0.9) -> pd.Series:
     """Compute leader scores for nodes in adjacency matrix ``A``.
 
     Parameters
@@ -121,9 +118,7 @@ def leader_scores(
     return z
 
 
-def ema_update(
-    prev_smoothed: pd.Series | None, new_z: pd.Series, span: int = 20
-) -> pd.Series:
+def ema_update(prev_smoothed: pd.Series | None, new_z: pd.Series, span: int = 20) -> pd.Series:
     """Single‑pass EMA smoothing of leadership scores.
 
     Parameters
@@ -147,36 +142,28 @@ def ema_update(
 
 
 # --- binary gate: 1 if price > SMA(lookback), else 0 ---
-def momentum_gate_binary(
-    prices: pd.DataFrame, ix: int, lookback: int = 50
-) -> pd.Series:
+def momentum_gate_binary(prices: pd.DataFrame, ix: int, lookback: int = 50) -> pd.Series:
     sma = prices.rolling(lookback).mean()
     gate = (prices.iloc[ix] > sma.iloc[ix]).astype(float)
     return gate.fillna(0.0)
 
 
 # --- continuous signal: (price - SMA)/SMA ---
-def momentum_signal_continuous(
-    prices: pd.DataFrame, ix: int, lookback: int = 50
-) -> pd.Series:
+def momentum_signal_continuous(prices: pd.DataFrame, ix: int, lookback: int = 50) -> pd.Series:
     sma = prices.rolling(lookback).mean()
     sig = (prices.iloc[ix] - sma.iloc[ix]) / sma.iloc[ix]
     return sig.replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
 
 # --- regime gates based on moving averages ---
-def ma_cross_regime_gate(
-    prices: pd.DataFrame, ix: int, fast: int = 50, slow: int = 200
-) -> pd.Series:
+def ma_cross_regime_gate(prices: pd.DataFrame, ix: int, fast: int = 50, slow: int = 200) -> pd.Series:
     s_fast = prices.rolling(fast).mean()
     s_slow = prices.rolling(slow).mean()
     gate = (s_fast.iloc[ix] > s_slow.iloc[ix]).astype(float)
     return gate.fillna(0.0)
 
 
-def ma50_rising_gate(
-    prices: pd.DataFrame, ix: int, lookback: int = 50, slope_win: int = 10
-) -> pd.Series:
+def ma50_rising_gate(prices: pd.DataFrame, ix: int, lookback: int = 50, slope_win: int = 10) -> pd.Series:
     sma = prices.rolling(lookback).mean()
     prev_ix = max(0, ix - slope_win)
     s = sma.iloc[ix] - sma.iloc[prev_ix]
@@ -184,14 +171,10 @@ def ma50_rising_gate(
     return gate.fillna(0.0)
 
 
-def ma_strength_continuous(
-    prices: pd.DataFrame, ix: int, fast: int = 50, slow: int = 200
-) -> pd.Series:
+def ma_strength_continuous(prices: pd.DataFrame, ix: int, fast: int = 50, slow: int = 200) -> pd.Series:
     s_fast = prices.rolling(fast).mean()
     s_slow = prices.rolling(slow).mean()
-    strength = ((s_fast.iloc[ix] - s_slow.iloc[ix]) / s_slow.iloc[ix]).replace(
-        [np.inf, -np.inf], 0.0
-    )
+    strength = ((s_fast.iloc[ix] - s_slow.iloc[ix]) / s_slow.iloc[ix]).replace([np.inf, -np.inf], 0.0)
     return strength.fillna(0.0)
 
 
@@ -331,9 +314,7 @@ def backtest_network_momentum(
             continue
 
         sample = returns.iloc[ix - window : ix]
-        A = (build_adj_fast if use_numba else build_adj)(
-            sample, max_lag=max_lag, min_abs_corr=min_abs_corr
-        )
+        A = (build_adj_fast if use_numba else build_adj)(sample, max_lag=max_lag, min_abs_corr=min_abs_corr)
 
         A = filter_edges_fdr(A, n_eff=sample.shape[0], q=0.2)
 
@@ -355,9 +336,7 @@ def backtest_network_momentum(
             mom_gate = ma_cross_regime_gate(prices, ix, fast=fast_ma, slow=slow_ma)
             w = combine_leader_momentum_longonly(zlead, mom_gate)
         elif regime == "ma_slope":
-            mom_gate = ma50_rising_gate(
-                prices, ix, lookback=fast_ma, slope_win=slope_win
-            )
+            mom_gate = ma50_rising_gate(prices, ix, lookback=fast_ma, slope_win=slope_win)
             w = combine_leader_momentum_longonly(zlead, mom_gate)
         elif regime == "ma_strength":
             mom_sig = ma_strength_continuous(prices, ix, fast=fast_ma, slow=slow_ma)
@@ -397,9 +376,7 @@ def backtest_network_momentum(
 
         first_day = True
         for day, rvec in hold_slice.iterrows():
-            r_p = float(
-                np.dot(w.reindex(rvec.index, fill_value=0.0).values, rvec.values)
-            )
+            r_p = float(np.dot(w.reindex(rvec.index, fill_value=0.0).values, rvec.values))
             if first_day:
                 r_p -= cost
                 first_day = False
@@ -412,11 +389,7 @@ def backtest_network_momentum(
 
     # ---- Metrics ----
     ann_mult = 252.0
-    cagr = (
-        (np.exp(port_rets.sum()) ** (ann_mult / len(port_rets)) - 1)
-        if len(port_rets) > 0
-        else 0.0
-    )
+    cagr = (np.exp(port_rets.sum()) ** (ann_mult / len(port_rets)) - 1) if len(port_rets) > 0 else 0.0
     ann_vol = port_rets.std() * np.sqrt(ann_mult)
     sharpe = (port_rets.mean() * ann_mult) / ann_vol if ann_vol > 0 else np.nan
     cum = port_rets.cumsum().apply(np.exp)
