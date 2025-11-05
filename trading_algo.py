@@ -1,3 +1,5 @@
+import json
+
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -223,7 +225,9 @@ def backtest_network_momentum(
 
         # build adj
         sample = returns.iloc[ix - window : ix]
-        A = (build_adj_fast if use_numba else build_adj)(sample, max_lag=max_lag, min_abs_corr=min_abs_corr)
+        A = (build_adj_fast if use_numba else build_adj)(
+            sample, max_lag=max_lag, min_abs_corr=min_abs_corr
+        )
         # optional sparsification of outgoing edges per node
         if sparsify_topk is not None and sparsify_topk > 0:
             A = sparsify_topk_outgoing(A, sparsify_topk)
@@ -318,9 +322,11 @@ def backtest_network_momentum(
         "Sharpe": sharpe,
         "MaxDrawdown": max_dd,
         "NumTrades": len(w_records),
-        "Start": port_rets.index[0],
-        "End": port_rets.index[-1],
+        "Start": str(port_rets.index[0]),
+        "End": str(port_rets.index[-1]),
     }
+    with open("metrics.json", "w") as f:
+        json.dump(metrics, f, indent=4)
 
     w_hist = pd.DataFrame(w_records)
     return port_rets, metrics, w_hist

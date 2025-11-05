@@ -11,7 +11,7 @@ The repository contains:
   targeting and optional regime filters.
 - `example.ipynb` — an end-to-end example that downloads market data, builds the network, and runs the backtest.
 
-### Visualisations
+### Visualisations and Results
 
 The figures below are generated with the helper script in `scripts/generate_artifacts.py` (see "Re-generate visuals and
 stats" for details). If the images don’t render yet, run the script to create them under `assets/` and commit the
@@ -20,6 +20,18 @@ outputs.
 ![Lead–Lag Network (last 252d)](images/leadlag_network.png)
 
 ![Network Momentum: Cumulative Growth of $1](images/cum_returns.png)
+
+The results are summarised in the table below.
+
+| Metric      | Value                |
+|-------------|----------------------|
+| CAGR        | 0.05070218789261105  |
+| AnnVol      | 0.09305721051394995  |
+| Sharpe      | 0.5314869289150495   |
+| MaxDrawdown | -0.14665971695554614 |
+| NumTrades   | 844                  |
+| Start       | 2008-04-15 00:00:00  |
+| End         | 2024-12-31 00:00:00  |
 
 ## Motivation
 
@@ -78,7 +90,7 @@ Open `example.ipynb` and run all cells. It will:
 1. Download daily close prices for a basket of ETFs (via yfinance).
 2. Compute daily log returns.
 3. Build a lead–lag adjacency matrix for the last 252 trading days.
-4. Visualise the network and list top “leaders”. 
+4. Visualise the network and list top “leaders”.
 5. Run the network momentum backtest and plot cumulative performance.
 
 > Tip: To save the network plot, add `plt.savefig("leadlag_network.png", bbox_inches="tight", dpi=150)` right after
@@ -173,11 +185,12 @@ Below is a brief overview of the most useful functions. Inspect the source files
       |corr| ≥ threshold.
 
 -
+
 `leadlag_graph(A: pd.DataFrame, title="lead-lag network", max_edges: int = 80, node_score: str = "out_strength", layout: str = "circular", seed: int = 42, visualise: bool = True)`
-    - Builds a NetworkX `DiGraph` from A, optionally visualises it, and computes per-node leader z-scores. Supported
-      `node_score` values include:
-        - `out_strength` (row sum), `abs_out_strength`, `pos_only`, `pagerank`, `sign_aware_pagerank`.
-    - Returns `(G, z_scores)`.
+- Builds a NetworkX `DiGraph` from A, optionally visualises it, and computes per-node leader z-scores. Supported
+`node_score` values include:
+- `out_strength` (row sum), `abs_out_strength`, `pos_only`, `pagerank`, `sign_aware_pagerank`.
+- Returns `(G, z_scores)`.
 
 - `build_adj_fast(returns: pd.DataFrame, max_lag: int = 5, min_abs_corr: float = 0.15) -> pd.DataFrame`
     - Optional Numba-accelerated adjacency builder with the same interface as `build_adj`.
