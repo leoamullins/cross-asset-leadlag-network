@@ -123,29 +123,23 @@ def leadlag_graph(
     visualise: bool = True,
 ):
     """
-    Generates a directed graph from a given adjacency matrix and visualizes it as a
-    lead-lag network by filtering the most significant edges and applying a scoring
-    metric to determine node importance.
+    Generate a directed graph from adjacency ``A`` and optionally visualise it as a
+    lead–lag network. Keeps the most significant edges and computes per‑node scores.
 
     Args:
-        A (pd.DataFrame): Input adjacency matrix representing the graph.
-        title (str): Title for the visualized graph. Default is "lead-lag network".
-        max_edges (int): Maximum number of edges to display, sorted by weight.
-            Default is 80.
-        node_score (str): Method for scoring nodes to determine importance. Options
-            include "pagerank" or "out_strength". Default is "out_strength".
-        layout (str): Layout algorithm for visualizing the graph. Options include
-            "spring", "kamada_kawai", "circular". Default is "circular".
-        seed (int): Random seed for layout reproducibility (used in spring layout
-            algorithm). Default is 42.
-        visualise (bool): Whether to display the graph visualization. Default is True.
+        A (pd.DataFrame): Input adjacency matrix.
+        title (str): Title for the visualised graph. Default "lead-lag network".
+        max_edges (int): Maximum number of edges to draw (by |weight|). Default 80.
+        node_score (str): Node scoring method: "pagerank" or "out_strength".
+        layout (str): Graph layout: "spring", "kamada_kawai", or "circular".
+        seed (int): Random seed for layout reproducibility (spring layout).
+        visualise (bool): Whether to display the visualisation.
 
     Returns:
-        tuple: A tuple containing the filtered directed graph (nx.DiGraph) and a
-        pandas Series representing the z-scored node importance scores (leaders and
-        followers).
+        tuple: (H, s) where ``H`` is the pruned ``nx.DiGraph`` and ``s`` is a Series
+        of z‑scored node leadership values.
     """
-    # Build base graph from adjacency (ignore zero-weight entries)
+    # Build base graph from adjacency (ignore zero‑weight entries)
     G = nx.from_pandas_adjacency(A, create_using=nx.DiGraph)
 
     edges = [(u, v, d["weight"]) for u, v, d in G.edges(data=True)]

@@ -1,8 +1,10 @@
+import json
+
 import networkx as nx
 import numpy as np
 import pandas as pd
 
-from lead_lag_graph import (
+from .graph import (
     build_adj,
     build_adj_fast,
     filter_edges_fdr,
@@ -14,12 +16,23 @@ MAX_LAG = 5
 def leader_scores(
     A: pd.DataFrame, method: str = "out_strength", pagerank_alpha: float = 0.9
 ) -> pd.Series:
+    """Compute leader scores for nodes in adjacency matrix ``A``.
+
+    Parameters
+    - A: Signed, directed adjacency matrix (rows = leaders, columns = followers).
+    - method: Scoring method: ``out_strength`` (default), ``abs_out_strength``,
+      ``pos_only``, ``pagerank``, or ``sign_aware_pagerank``.
+    - pagerank_alpha: Damping factor for PageRank variants.
+
+    Returns
+    - Pandas Series of z-scored leadership values indexed by node, named ``leader_z``.
+    """
     if A.empty:
         return pd.Series(dtype=float)
 
     method = (method or "out_strength").lower()
     if method == "pagerank":
-        # Standard PageRank on signed matrix can misbehave; assume weights are nonnegative
+        # Standard PageRank on signed matrix can misbehave; assume weights are non‑negative
         G = nx.from_pandas_adjacency(A.clip(lower=0.0), create_using=nx.DiGraph)
         if G.number_of_edges() == 0:
             s = pd.Series(0.0, index=A.index)
@@ -40,11 +53,11 @@ def leader_scores(
                     dangling=dangling,
                 )
             except nx.PowerIterationFailedConvergence:
-                # Fallback 1: numpy-based PageRank (eigenvector solver)
+                # Fallback 1: NumPy‑based PageRank (eigenvector solver)
                 try:
                     pr = nx.pagerank_numpy(G, alpha=pagerank_alpha, weight="weight")
                 except Exception:
-                    # Fallback 2: use normalized positive out-strengths
+                    # Fallback 2: use normalised positive out‑strengths
                     s_out = A.clip(lower=0.0).sum(axis=1)
                     total = float(s_out.sum()) if np.isfinite(s_out.sum()) else 0.0
                     if total <= 0.0:
@@ -58,7 +71,7 @@ def leader_scores(
     elif method == "pos_only":
         s = A.clip(lower=0.0).sum(axis=1)
     elif method == "sign_aware_pagerank":
-        # Influence via |A|, orientation from sign of row-sum of A
+        # Influence via |A|, orientation from sign of row‑sum of A
         G = nx.from_pandas_adjacency(A.abs(), create_using=nx.DiGraph)
         if G.number_of_edges() == 0:
             infl = pd.Series(0.0, index=A.index)
@@ -82,7 +95,7 @@ def leader_scores(
                 try:
                     pr = nx.pagerank_numpy(G, alpha=pagerank_alpha, weight="weight")
                 except Exception:
-                    # Fallback: degree-based influence on |A|
+                    # Fallback: degree‑based influence on |A|
                     s_out = A.abs().sum(axis=1)
                     total = float(s_out.sum()) if np.isfinite(s_out.sum()) else 0.0
                     if total <= 0.0:
@@ -95,10 +108,10 @@ def leader_scores(
         sign = A.sum(axis=1).apply(lambda x: 1.0 if x > 0 else (-1.0 if x < 0 else 0.0))
         s = infl * sign
     else:
-        # Default: signed out-strength (row sum)
+        # Default: signed out‑strength (row sum)
         s = A.sum(axis=1)
 
-    # z-score (avoid div-by-zero)
+    # z‑score (avoid division‑by‑zero)
     mu, sd = s.mean(), s.std()
     if sd == 0 or np.isnan(sd):
         z = s - mu
@@ -111,10 +124,19 @@ def leader_scores(
 def ema_update(
     prev_smoothed: pd.Series | None, new_z: pd.Series, span: int = 20
 ) -> pd.Series:
+    """Single‑pass EMA smoothing of leadership scores.
+
+    Parameters
+    - prev_smoothed: Previously smoothed Series (or None for first call).
+    - new_z: New leadership z‑scores.
+    - span: EMA span in periods (higher = slower).
+
+    Returns
+    - Smoothed Series aligned to ``new_z``.
+    """
     if prev_smoothed is None:
         return new_z.fillna(0.0)
 
-    # align index
     idx = new_z.index.union(prev_smoothed.index)
     prev = prev_smoothed.reindex(idx).fillna(0.0)
     cur = new_z.reindex(idx).fillna(0.0)
@@ -213,7 +235,7 @@ def scale_to_target_vol(
     if returns_win.shape[0] < 20 or w.abs().sum() == 0:
         return w
     cov = returns_win.cov()
-    # optional ridge shrinkage to stabilize covariance
+    # optional ridge shrinkage to stabilise covariance
     if shrink_lambda is not None and shrink_lambda > 0:
         lam = float(shrink_lambda)
         diag_mean = np.nanmean(np.diag(cov.values)) if cov.size else 0.0
@@ -258,6 +280,36 @@ def backtest_network_momentum(
     shrink_lambda: float | None = None,
     use_numba: bool = False,
 ):
+    """Reference backtest for the network‑driven momentum strategy.
+
+    Builds the lead–lag network on each rebalance date, scores leaders, applies
+    a momentum/regime gate, optionally targets volatility, and computes daily
+    portfolio log returns between rebalances.
+
+    Parameters
+    - prices: Wide DataFrame of prices (index = dates, columns = tickers).
+    - returns: Wide DataFrame of log returns aligned with ``prices``.
+    - window: Lookback window (trading days) for network estimation.
+    - max_lag: Maximum lag for pairwise correlations.
+    - min_abs_corr: Threshold on |corr| for including edges.
+    - rebalance: "M" for month‑end or "W-FRI" for Fridays.
+    - mom_lookback: Lookback for price‑SMA gate if used.
+    - ema_span: EMA span for smoothing leader scores; None disables smoothing.
+    - target_ann_vol: Annualised volatility target; None disables vol targeting.
+    - tc_bps: Transaction cost in basis points per side.
+    - cov_win: Window for covariance estimation in vol targeting.
+    - leader_method: Leader scoring method (see ``leader_scores``).
+    - pagerank_alpha: Damping factor for PageRank methods.
+    - sparsify_topk: Keep top‑k outgoing edges per node (by |weight|).
+    - regime: One of "price_sma", "ma_cross", "ma_slope", "ma_strength".
+    - fast_ma, slow_ma, slope_win: Parameters for regime functions.
+    - shrink_lambda: Ridge shrinkage for covariance stabilisation.
+    - use_numba: Use Numba‑accelerated adjacency builder if available.
+
+    Returns
+    - (port_rets, metrics, w_hist): daily log returns Series, metrics dict, and
+      DataFrame of rebalance‑time weights.
+    """
     if rebalance.upper() == "M":
         rebal_dates = prices.resample("M").last().index
     elif rebalance.upper() == "W-FRI":
@@ -278,7 +330,6 @@ def backtest_network_momentum(
         if ix < max(window, mom_lookback) + 1:
             continue
 
-        # build adj
         sample = returns.iloc[ix - window : ix]
         A = (build_adj_fast if use_numba else build_adj)(
             sample, max_lag=max_lag, min_abs_corr=min_abs_corr
@@ -383,8 +434,8 @@ def backtest_network_momentum(
         "Start": str(port_rets.index[0]),
         "End": str(port_rets.index[-1]),
     }
-    # with open("metrics.json", "w") as f:
-    #     json.dump(metrics, f, indent=4)
+    with open("metrics.json", "w") as f:
+        json.dump(metrics, f)
 
     w_hist = pd.DataFrame(w_records)
     return port_rets, metrics, w_hist

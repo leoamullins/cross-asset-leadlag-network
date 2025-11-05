@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from trading_algo import backtest_network_momentum
+from .algo import backtest_network_momentum
 
 
 def walkforward_validation(

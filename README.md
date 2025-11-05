@@ -5,10 +5,14 @@ directed network, and driving a simple momentum-style portfolio strategy from th
 
 The repository contains:
 
-- `lead_lag_graph.py` — utilities to compute lagged correlations, build a directed adjacency matrix, and visualise the
-  network.
-- `trading_algo.py` — a reference backtest that uses the network to select leaders and allocate capital with risk
-  targeting and optional regime filters.
+- A proper Python package `cross_asset_leadlag/` that organises the code into modules:
+  - `cross_asset_leadlag.graph` — lagged correlations, adjacency construction, and visualisation
+  - `cross_asset_leadlag.algo` — strategy components and the reference backtest
+  - `cross_asset_leadlag.validation` — simple walk-forward and metrics helpers
+- Legacy convenience modules kept for backward compatibility:
+  - `lead_lag_graph.py` (re-exports from the package)
+  - `trading_algo.py` (re-exports from the package)
+  - `stat_validation.py` (re-exports from the package)
 - `example.ipynb` — an end-to-end example that downloads market data, builds the network, and runs the backtest.
 
 ### Visualisations and Results
@@ -103,9 +107,12 @@ Open `example.ipynb` and run all cells. It will:
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from lead_lag_graph import build_adj, leadlag_graph
-from trading_algo import backtest_network_momentum
+from cross_asset_leadlag.graph import build_adj, leadlag_graph
+from cross_asset_leadlag.algo import backtest_network_momentum
 import matplotlib.pyplot as plt
+# Legacy alternative (still works):
+# from lead_lag_graph import build_adj, leadlag_graph
+# from trading_algo import backtest_network_momentum
 
 # 1) Data
 tickers = [
