@@ -1,13 +1,16 @@
-import json
+from dataclasses import dataclass
 
 import networkx as nx
 import numpy as np
 import pandas as pd
-from graph import (
+
+from .graph import (
     build_adj,
     build_adj_fast,
     filter_edges_fdr,
 )
+
+from .config import BacktestConfig
 
 MAX_LAG = 5
 
@@ -242,26 +245,8 @@ def transaction_cost(turnover_abs: float, bps_per_side: float = 3.0) -> float:
 
 def backtest_network_momentum(
     prices: pd.DataFrame,  # Close or Adj Close (wide DF)
-    returns: pd.DataFrame,  # daily log returns aligned with prices
-    window: int = 252,  # lookback for network
-    max_lag: int = 5,
-    min_abs_corr: float = 0.15,
-    rebalance: str = "M",  # "M" (monthly) or "W-FRI"
-    mom_lookback: int = 50,
-    ema_span: int | None = 20,  # None => no smoothing
-    target_ann_vol: float | None = 0.10,  # None => no vol targeting
-    tc_bps: float = 3.0,  # transaction cost bps per side
-    cov_win: int = 60,  # cov window for vol targeting
-    # New options
-    leader_method: str = "out_strength",  # e.g., "out_strength", "abs_out_strength", "pos_only", "sign_aware_pagerank", "pagerank"
-    pagerank_alpha: float = 0.9,
-    sparsify_topk: int | None = None,
-    regime: str = "price_sma",  # "price_sma", "ma_cross", "ma_slope", "ma_strength"
-    fast_ma: int = 50,
-    slow_ma: int = 200,
-    slope_win: int = 10,
-    shrink_lambda: float | None = None,
-    use_numba: bool = False,
+    returns: pd.DataFrame,
+    config: BacktestConfig,
 ):
     """Reference backtest for the network‑driven momentum strategy.
 
@@ -272,32 +257,17 @@ def backtest_network_momentum(
     Parameters
     - prices: Wide DataFrame of prices (index = dates, columns = tickers).
     - returns: Wide DataFrame of log returns aligned with ``prices``.
-    - window: Lookback window (trading days) for network estimation.
-    - max_lag: Maximum lag for pairwise correlations.
-    - min_abs_corr: Threshold on |corr| for including edges.
-    - rebalance: "M" for month‑end or "W-FRI" for Fridays.
-    - mom_lookback: Lookback for price‑SMA gate if used.
-    - ema_span: EMA span for smoothing leader scores; None disables smoothing.
-    - target_ann_vol: Annualised volatility target; None disables vol targeting.
-    - tc_bps: Transaction cost in basis points per side.
-    - cov_win: Window for covariance estimation in vol targeting.
-    - leader_method: Leader scoring method (see ``leader_scores``).
-    - pagerank_alpha: Damping factor for PageRank methods.
-    - sparsify_topk: Keep top‑k outgoing edges per node (by |weight|).
-    - regime: One of "price_sma", "ma_cross", "ma_slope", "ma_strength".
-    - fast_ma, slow_ma, slope_win: Parameters for regime functions.
-    - shrink_lambda: Ridge shrinkage for covariance stabilisation.
-    - use_numba: Use Numba‑accelerated adjacency builder if available.
+    - config: BacktestConfig with all datails
 
     Returns
     - (port_rets, metrics, w_hist): daily log returns Series, metrics dict, and
       DataFrame of rebalance‑time weights.
     """
-    if rebalance.upper() == "M":
+    if config.rebalance.upper() == "M":
         rebal_dates = prices.resample("M").last().index
-    elif rebalance.upper() == "W-FRI":
+    elif config.rebalance.upper() == "W-FRI":
         # weekly on Fridays
-        rebal_dates = prices[prices.index.weekday == 4].index
+        rebal_dates = prices[prices.index.weekday == 4].index  # type: ignore
     else:
         raise ValueError("rebalance must be 'M' or 'W-FRI'")
 
@@ -310,49 +280,51 @@ def backtest_network_momentum(
         if t not in prices.index:
             continue
         ix = prices.index.get_loc(t)
-        if ix < max(window, mom_lookback) + 1:
+        if ix < max(config.window, config.mom_lookback) + 1:  # type: ignore
             continue
 
-        sample = returns.iloc[ix - window : ix]
-        A = (build_adj_fast if use_numba else build_adj)(sample, max_lag=max_lag, min_abs_corr=min_abs_corr)
+        sample = returns.iloc[ix - config.window : ix]  # type: ignore
+        A = (build_adj_fast if config.use_numba else build_adj)(
+            sample, max_lag=config.max_lag, min_abs_corr=config.min_abs_corr
+        )
 
         A = filter_edges_fdr(A, n_eff=sample.shape[0], q=0.2)
 
         # optional sparsification of outgoing edges per node
-        if sparsify_topk is not None and sparsify_topk > 0:
-            A = sparsify_topk_outgoing(A, sparsify_topk)
+        if config.sparsify_topk is not None and config.sparsify_topk > 0:
+            A = sparsify_topk_outgoing(A, config.sparsify_topk)
 
         # leader scoring (configurable)
-        zlead = leader_scores(A, method=leader_method, pagerank_alpha=pagerank_alpha)
-        if ema_span is not None:
-            zlead = ema_update(prev_smoothed=zlead_prev, new_z=zlead, span=ema_span)
+        zlead = leader_scores(A, method=config.leader_method, pagerank_alpha=config.pagerank_alpha)
+        if config.ema_span is not None:
+            zlead = ema_update(prev_smoothed=zlead_prev, new_z=zlead, span=config.ema_span)  # type: ignore
             zlead_prev = zlead.copy()
 
         # regime gating / signals
-        if regime == "price_sma":
-            mom_gate = momentum_gate_binary(prices, ix, lookback=mom_lookback)
+        if config.regime == "price_sma":
+            mom_gate = momentum_gate_binary(prices, ix, lookback=config.mom_lookback)
             w = combine_leader_momentum_longonly(zlead, mom_gate)
-        elif regime == "ma_cross":
-            mom_gate = ma_cross_regime_gate(prices, ix, fast=fast_ma, slow=slow_ma)
+        elif config.regime == "ma_cross":
+            mom_gate = ma_cross_regime_gate(prices, ix, fast=config.fast_ma, slow=config.slow_ma)
             w = combine_leader_momentum_longonly(zlead, mom_gate)
-        elif regime == "ma_slope":
-            mom_gate = ma50_rising_gate(prices, ix, lookback=fast_ma, slope_win=slope_win)
+        elif config.regime == "ma_slope":
+            mom_gate = ma50_rising_gate(prices, ix, lookback=config.fast_ma, slope_win=config.slope_win)
             w = combine_leader_momentum_longonly(zlead, mom_gate)
-        elif regime == "ma_strength":
-            mom_sig = ma_strength_continuous(prices, ix, fast=fast_ma, slow=slow_ma)
+        elif config.regime == "ma_strength":
+            mom_sig = ma_strength_continuous(prices, ix, fast=config.fast_ma, slow=config.slow_ma)
             w = combine_leader_momentum_continuous(zlead, mom_sig)
         else:
             # fallback to original binary momentum gate
-            mom_gate = momentum_gate_binary(prices, ix, lookback=mom_lookback)
+            mom_gate = momentum_gate_binary(prices, ix, lookback=config.mom_lookback)
             w = combine_leader_momentum_longonly(zlead, mom_gate)
 
-        if target_ann_vol is not None:
-            cov_window = returns.iloc[ix - cov_win : ix]
+        if config.target_ann_vol is not None:
+            cov_window = returns.iloc[ix - config.cov_win : ix]  # type: ignore
             w = scale_to_target_vol(
                 cov_window,
                 w,
-                target_ann_vol=target_ann_vol,
-                shrink_lambda=shrink_lambda,
+                target_ann_vol=config.target_ann_vol,
+                shrink_lambda=config.shrink_lambda,
             )
 
         w_records.append(pd.Series(w, name=prices.index[ix]))
@@ -367,7 +339,7 @@ def backtest_network_momentum(
             end_pos = prices.index.searchsorted(nxt, side="left")
 
         turnover_abs = (w - w_prev).abs().sum()
-        cost = transaction_cost(turnover_abs, bps_per_side=tc_bps)
+        cost = transaction_cost(turnover_abs, bps_per_side=config.tc_bps)
         w_prev = w.copy()
 
         hold_slice = returns.iloc[next_pos:end_pos]
@@ -407,8 +379,8 @@ def backtest_network_momentum(
         "Start": str(port_rets.index[0]),
         "End": str(port_rets.index[-1]),
     }
-    with open("metrics.json", "w") as f:
-        json.dump(metrics, f)
+    # with open("metrics.json", "w") as f:
+    # json.dump(metrics, f)
 
     w_hist = pd.DataFrame(w_records)
     return port_rets, metrics, w_hist

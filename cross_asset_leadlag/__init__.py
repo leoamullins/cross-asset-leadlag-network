@@ -8,30 +8,31 @@ Public API:
 """
 
 from .algo import (
-    leader_scores,
+    backtest_network_momentum,
+    combine_leader_momentum_continuous,
+    combine_leader_momentum_longonly,
     ema_update,
+    leader_scores,
+    ma50_rising_gate,
+    ma_cross_regime_gate,
+    ma_strength_continuous,
     momentum_gate_binary,
     momentum_signal_continuous,
-    ma_cross_regime_gate,
-    ma50_rising_gate,
-    ma_strength_continuous,
-    sparsify_topk_outgoing,
-    combine_leader_momentum_longonly,
-    combine_leader_momentum_continuous,
     scale_to_target_vol,
+    sparsify_topk_outgoing,
     transaction_cost,
-    backtest_network_momentum,
 )
+from .config import BacktestConfig
 from .graph import (
     MAX_LAG,
-    corr_at_lag,
     best_lag_corr,
     build_adj,
     build_adj_fast,
-    leadlag_graph,
+    corr_at_lag,
     filter_edges_fdr,
+    leadlag_graph,
 )
-from .validation import walkforward_validation, sharpe_ratio
+from .validation import sharpe_ratio, walkforward_validation
 
 __all__ = [
     # graph
@@ -59,4 +60,5 @@ __all__ = [
     # validation
     "walkforward_validation",
     "sharpe_ratio",
+    "BacktestConfig",
 ]

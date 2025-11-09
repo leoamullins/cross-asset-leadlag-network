@@ -4,8 +4,6 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-WINDOW = 252
-REBAL_FREQ = "M"
 MAX_LAG = 5
 
 
@@ -68,9 +66,7 @@ def best_lag_corr(x: pd.Series, y: pd.Series, max_lag: int = MAX_LAG):
     return best
 
 
-def build_adj(
-    returns: pd.DataFrame, max_lag: int = MAX_LAG, min_abs_corr: float = 0.15
-):
+def build_adj(returns: pd.DataFrame, max_lag: int = MAX_LAG, min_abs_corr: float = 0.15):
     """
     Constructs an adjacency matrix representing the correlation structure among time series
     data with specified maximum lag and minimum absolute correlation threshold. The matrix
@@ -191,9 +187,7 @@ def leadlag_graph(
     # edge style
     weights = np.array([abs(H[u][v]["weight"]) for u, v in H.edges()])
     if weights.size:
-        ew = 1.0 + 4.0 * (weights - weights.min()) / (
-            np.ptp(weights) if np.ptp(weights) > 0 else 1.0
-        )
+        ew = 1.0 + 4.0 * (weights - weights.min()) / (np.ptp(weights) if np.ptp(weights) > 0 else 1.0)
     else:
         ew = 1.5
 
@@ -207,9 +201,7 @@ def leadlag_graph(
             cmap="coolwarm",
         )
         if H.number_of_edges() > 0:
-            nx.draw_networkx_edges(
-                H, pos, arrowstyle="->", arrowsize=12, width=ew, edge_color="#555"
-            )
+            nx.draw_networkx_edges(H, pos, arrowstyle="->", arrowsize=12, width=ew, edge_color="#555")
         nx.draw_networkx_labels(H, pos, font_size=9)
 
         if len(H):
@@ -218,9 +210,7 @@ def leadlag_graph(
 
         subtitle = None
         if G.number_of_edges() == 0:
-            subtitle = (
-                "No edges passed the correlation/lag threshold; showing nodes only."
-            )
+            subtitle = "No edges passed the correlation/lag threshold; showing nodes only."
         elif H.number_of_edges() == 0:
             subtitle = "Edges were pruned by max_edges/top-k; showing nodes only."
 
@@ -309,9 +299,7 @@ def _best_lag_corr_numba(x: np.ndarray, y: np.ndarray, max_lag: int):
 
 
 @njit(parallel=True, fastmath=True)
-def _build_adj_numba(
-    returns_np: np.ndarray, max_lag: int, min_abs_corr: float
-) -> np.ndarray:
+def _build_adj_numba(returns_np: np.ndarray, max_lag: int, min_abs_corr: float) -> np.ndarray:
     T, N = returns_np.shape
     A = np.zeros((N, N), dtype=np.float64)
     for i in prange(N):
@@ -328,9 +316,7 @@ def _build_adj_numba(
     return A
 
 
-def build_adj_fast(
-    returns: pd.DataFrame, max_lag: int = MAX_LAG, min_abs_corr: float = 0.15
-) -> pd.DataFrame:
+def build_adj_fast(returns: pd.DataFrame, max_lag: int = MAX_LAG, min_abs_corr: float = 0.15) -> pd.DataFrame:
     """Numba-accelerated adjacency builder. Falls back to Python version if Numba unavailable."""
     cols = list(returns.columns)
     returns_np = returns.values.astype(np.float64, copy=False)

@@ -3,6 +3,7 @@ pandas>=1.5
 matplotlib>=3.6
 networkx>=2.8
 numba>=0.58
+scipy>=1.9
 yfinance>=0.2.36
 
 [dev]

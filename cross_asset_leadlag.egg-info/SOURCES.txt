@@ -3,6 +3,7 @@ README.md
 pyproject.toml
 cross_asset_leadlag/__init__.py
 cross_asset_leadlag/algo.py
+cross_asset_leadlag/config.py
 cross_asset_leadlag/graph.py
 cross_asset_leadlag/validation.py
 cross_asset_leadlag.egg-info/PKG-INFO

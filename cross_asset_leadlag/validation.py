@@ -1,17 +1,17 @@
 import numpy as np
 import pandas as pd
-from algo import backtest_network_momentum
+from .algo import backtest_network_momentum
+from .config import BacktestConfig
 
 
 def walkforward_validation(
     prices: pd.DataFrame,
     returns: pd.DataFrame,
-    window: int = 252,
+    config: BacktestConfig,
     test_len: int = 63,
     purge: int = 5,
-    embargo: int = 5,
-    **kwargs,
 ):
+    window: int = config.window
     n = len(prices)
     test_starts = np.arange(window, n - test_len, test_len)
     all_rets = []
@@ -22,8 +22,9 @@ def walkforward_validation(
         p_test, r_test = prices.iloc[test_slice], returns.iloc[test_slice]
         if len(p_test) == 0:
             continue
+
         port_rets, _, _ = backtest_network_momentum(
-            prices=pd.concat([p_train, p_test]), returns=pd.concat([r_train, r_test]), window=window, **kwargs
+            prices=pd.concat([p_train, p_test]), returns=pd.concat([r_train, r_test]), config=config
         )
 
         oos_rets = port_rets.loc[p_test.index[0] : p_test.index[-1]]

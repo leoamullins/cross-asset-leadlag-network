@@ -142,6 +142,7 @@ cross-asset-leadlag-network/
 │   ├── __init__.py         # Public API exports
 │   ├── graph.py            # Network construction and PageRank
 │   ├── algo.py             # Trading strategy implementation
+│   ├── config.py           # Configuration dataclass
 │   └── validation.py       # Walk-forward validation utilities
 ├── requirements.txt
 └── README.md
@@ -168,9 +169,93 @@ cross-asset-leadlag-network/
 - `shrink_lambda`: Ridge shrinkage parameter for covariance stabilisation
 - `cov_win`: Window size for covariance estimation in volatility targeting
 
+## Technical Implementation Details
+
+### `cross_asset_leadlag.graph`
+
+**Core Functions:**
+
+- **`build_adj(returns, max_lag=5, min_abs_corr=0.15)`** → `pd.DataFrame`
+  - Constructs signed, directed adjacency matrix from lagged correlations
+  - Returns *N×N* matrix where *A[i,j]* = correlation weight if *i* leads *j*
+
+- **`build_adj_fast(returns, max_lag=5, min_abs_corr=0.15)`** → `pd.DataFrame`
+  - Numba-accelerated version (10× faster); automatic fallback if Numba unavailable
+
+- **`filter_edges_fdr(A, n_eff, q=0.1)`** → `pd.DataFrame`
+  - Benjamini–Hochberg FDR correction; zeros out non-significant edges
+
+- **`leadlag_graph(A, title, max_edges=80, node_score='out_strength', layout='circular', visualise=True)`** → `(nx.DiGraph, pd.Series)`
+  - Visualises network and computes leadership z-scores
+  - Node scoring methods: `out_strength`, `abs_out_strength`, `pos_only`, `pagerank`, `sign_aware_pagerank`
+
+### `cross_asset_leadlag.algo`
+
+**Strategy Functions:**
+
+- **`leader_scores(A, method='out_strength', pagerank_alpha=0.9)`** → `pd.Series`
+  - Computes z-scored leadership centrality measures
+
+- **`BacktestConfig(window=252, max_lag=5, ..., use_numba=False)`** → `dataclass`
+  - Single source of truth for strategy hyperparameters (window length, regime, vol targeting, etc.)
+
+- **`backtest_network_momentum(prices, returns, config)`** → `(pd.Series, dict, pd.DataFrame)`
+  - Full backtesting engine with rolling network construction
+  - Key parameters:
+    - `leader_method`: `'out_strength'`, `'abs_out_strength'`, `'pagerank'`, `'sign_aware_pagerank'`
+    - `regime`: `'price_sma'`, `'ma_cross'`, `'ma_slope'`, `'ma_strength'`
+    - `target_ann_vol`: Volatility target (e.g., 0.10 for 10%)
+    - `shrink_lambda`: Covariance shrinkage intensity (0.0 = none, 1.0 = full)
+    - `sparsify_topk`: Retain top-*k* edges per node
+    - `use_numba`: Enable JIT acceleration
+  - Returns: `(daily_returns, metrics_dict, weight_history)`
+
+**Regime Filters:**
+
+- `momentum_gate_binary(prices, ix, lookback)`: Price > SMA filter
+- `ma_cross_regime_gate(prices, ix, fast, slow)`: Golden/death cross
+- `ma50_rising_gate(prices, ix, slope_win)`: SMA slope filter
+- `ma_strength_continuous(prices, ix, fast, slow)`: Continuous momentum signal
+
+### `cross_asset_leadlag.validation`
+
+- **`walkforward_validation(prices, returns, config, test_len=63, purge=5, ...)`** → `pd.Series`
+  - Reuses the same `BacktestConfig` as the core strategy and applies walk-forward splits with configurable test-window and purge lengths
+
+- **`sharpe_ratio(returns, ann_factor=252, risk_free=0.0)`** → `float`
+  - Annualised Sharpe ratio calculation
+
+## Usage Notes
+
+**Performance optimisation:**
+- Enable `use_numba=True` for universes >20 assets
+- Reduce `max_lag` or `window` during prototyping
+- Cache yfinance data locally to avoid API throttling
+
+**Stability considerations:**
+- Increase `min_abs_corr` (e.g., 0.20) for sparser, more stable networks
+- Apply `sparsify_topk=3` to retain only strongest edges per node
+- Use `ema_span=15` to smooth noisy leadership signals
+
+**Regime sensitivity:**
+- `ma_cross` works well in trending markets but lags in reversals
+- `price_sma` provides faster regime detection but higher turnover
+- `ma_strength` offers continuous exposure scaling (no binary gates)
+
 ## Tech Stack
 
 Python • NetworkX • NumPy • pandas • Matplotlib • SciPy • Numba (optional)
+
+## Project Background
+
+This research project was developed as part of a quantitative finance portfolio demonstrating:
+- **Statistical signal processing**: Time-series correlation analysis with lag optimisation
+- **Network science applications**: Graph theory applied to financial markets
+- **Systematic strategy development**: End-to-end pipeline from research to backtesting
+- **Software engineering**: Modular Python package with performance optimisation (Numba JIT)
+- **Risk management**: Volatility targeting, covariance estimation, transaction cost modelling
+
+The implementation showcases practical skills relevant to quantitative researcher and systematic trading roles, including backtesting best practices, statistical validation, and production-quality code organisation.
 
 ## Future Improvements
 
@@ -182,8 +267,19 @@ Python • NetworkX • NumPy • pandas • Matplotlib • SciPy • Numba (opt
 
 ## References
 
+**Lead–lag relationships:**
+- Brunetti, C., & Lildholdt, P. (2007). *Time-varying correlations and the spatial structure of stock market*.
+- Curme, C., et al. (2015). *Emergence of statistically validated financial intraday lead-lag relationships*.
+
+**Network methods in finance:**
 - Billio, M., et al. (2012). "Econometric measures of connectedness and systemic risk in the finance and insurance sectors"
 - Diebold, F. X., & Yilmaz, K. (2014). "On the network topology of variance decompositions"
+- Mantegna, R. N. (1999). *Hierarchical structure in financial markets*.
+- Onnela, J.-P., et al. (2003). *Dynamics of market correlations: Taxonomy and portfolio analysis*.
+
+**Portfolio construction & risk management:**
+- Ledoit, O., & Wolf, M. (2004). *Honey, I shrunk the sample covariance matrix*.
+- Grinold, R. C., & Kahn, R. N. (1999). *Active Portfolio Management*.
 
 ## License
 
