@@ -4,7 +4,7 @@ Quantitative framework for identifying information flow across asset classes usi
 
 ## Results
 
-![Cumulative Returns](images/cumulative_returns.png)
+![Cumulative Returns](images/cum_returns.png)
 
 **Backtest Performance (2008-2024):**
 - Sharpe Ratio: 0.86
@@ -49,7 +49,7 @@ pip install -r requirements.txt
 ```python
 from network_momentum import NetworkStrategy
 
-# Initialize strategy
+# Initialise strategy
 strategy = NetworkStrategy(
     lookback_period=60,
     n_assets=50,
@@ -73,7 +73,7 @@ print(f"Max Drawdown: {results.max_drawdown:.1%}")
 - **Multi-asset coverage:** Equities, bonds, FX, commodities
 - **Robust validation:** Walk-forward analysis across multiple market regimes
 - **Realistic modeling:** Includes transaction costs, slippage, and execution delays
-- **Visualization tools:** Network graphs and performance attribution analysis
+- **Visualisation tools:** Network graphs and performance attribution analysis
 
 ## Project Structure
 
