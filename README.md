@@ -52,17 +52,15 @@ pip install -r requirements.txt
 ## Usage
 
 ```python
-from cross_asset_leadlag import backtest_network_momentum
+from cross_asset_leadlag import backtest_network_momentum, BacktestConfig
 import pandas as pd
 
 # Load your price and return data
 prices = pd.read_csv('prices.csv', index_col=0, parse_dates=True)
 returns = prices.pct_change().fillna(0)
 
-# Run backtest with custom parameters
-port_rets, metrics, w_hist = backtest_network_momentum(
-    prices=prices,
-    returns=returns,
+# Configure backtest parameters
+config = BacktestConfig(
     window=252,              # lookback window for network
     max_lag=5,               # maximum lag for correlations
     min_abs_corr=0.15,       # minimum correlation threshold
@@ -75,6 +73,13 @@ port_rets, metrics, w_hist = backtest_network_momentum(
     use_numba=True           # use Numba acceleration if available
 )
 
+# Run backtest
+port_rets, metrics, w_hist = backtest_network_momentum(
+    prices=prices,
+    returns=returns,
+    config=config
+)
+
 # Display performance metrics
 print(f"Sharpe Ratio: {metrics['Sharpe']:.2f}")
 print(f"CAGR: {metrics['CAGR']:.1%}")
@@ -84,19 +89,22 @@ print(f"Max Drawdown: {metrics['MaxDrawdown']:.1%}")
 ### Walk-Forward Validation
 
 ```python
-from cross_asset_leadlag import walkforward_validation, sharpe_ratio
+from cross_asset_leadlag import walkforward_validation, sharpe_ratio, BacktestConfig
+
+# Configure backtest parameters
+config = BacktestConfig(
+    window=252,
+    leader_method='pagerank',
+    regime='ma_cross'
+)
 
 # Run walk-forward validation
 oos_returns = walkforward_validation(
     prices=prices,
     returns=returns,
-    window=252,
+    config=config,
     test_len=63,      # ~3 months per test period
-    purge=5,          # purge period to avoid contamination
-    embargo=5,        # embargo period after test
-    # pass any backtest_network_momentum parameters
-    leader_method='pagerank',
-    regime='ma_cross'
+    purge=5           # purge period to avoid contamination
 )
 
 # Calculate out-of-sample Sharpe ratio
