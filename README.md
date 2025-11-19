@@ -265,14 +265,6 @@ This research project was developed as part of a quantitative finance portfolio 
 
 The implementation showcases practical skills relevant to quantitative researcher and systematic trading roles, including backtesting best practices, statistical validation, and production-quality code organisation.
 
-## Future Improvements
-
-- [ ] Extend to intraday data for higher frequency signals
-- [ ] Incorporate fundamental factors alongside price-based networks
-- [ ] Implement adaptive rebalancing based on market volatility
-- [ ] Add options overlay for tail risk hedging
-- [ ] Multi-factor regime classification using machine learning
-
 ## References
 
 **Lead–lag relationships:**
